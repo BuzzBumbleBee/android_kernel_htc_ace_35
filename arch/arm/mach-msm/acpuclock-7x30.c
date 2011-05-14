@@ -39,20 +39,6 @@
 #define SCSS_CLK_CTL_ADDR	(MSM_ACC_BASE + 0x04)
 #define SCSS_CLK_SEL_ADDR	(MSM_ACC_BASE + 0x08)
 
-#define PLL2_L_VAL_ADDR		(MSM_CLK_CTL_BASE + 0x33C)
-#define PLL2_806_MHZ		42
-#define PLL2_1024_MHZ		53
-#define PLL2_1200_MHZ		125
-#define PLL2_1400_MHZ		73
-#define PLL2_1420_MHZ		74
-#define PLL2_1440_MHZ		75
-#define PLL2_1460_MHZ		76
-#define PLL2_1480_MHZ		77
-#define PLL2_1500_MHZ		78
-#define PLL2_1520_MHZ		79
-#define PLL2_1540_MHZ		80
-#define PLL2_1560_MHZ		81
-
 #define dprintk(msg...) \
 	cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "cpufreq-msm", msg)
 
