@@ -155,6 +155,16 @@ config PERFLOCK_SCREEN_OFF_MAX
 	int "Maximum speed while screen off"
 	default MSM_CPU_FREQ_ONDEMAND_MIN
 
+config LOW_FREQ
+	bool "Limit_To_1.22Ghz"
+	default n
+        depends on CPU_FREQ && !PERFLOCK
+
+config SUPER_FREQ
+	bool "Enable 2Ghz O/C"
+	default n
+        depends on CPU_FREQ && !PERFLOCK && !LOW_FREQ
+
 config MSM_AMSS_VERSION
 	int
 	default 6210 if MSM_AMSS_VERSION_6210

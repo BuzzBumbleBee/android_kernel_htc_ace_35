@@ -91,14 +91,38 @@ struct clkctl_acpu_speed {
 static struct clock_state drv_state = { 0 };
 
 static struct cpufreq_frequency_table freq_table[] = {
-	{ 0, 245760 },
-	{ 1, 368640 },
-	{ 2, 768000 },
-#ifndef CONFIG_ACPUCLOCK_LIMIT_768MHZ
-	{ 3, 806400 },
-	{ 4, CPUFREQ_TABLE_END },
+	{ 0, 230400 },
+	{ 1, 307200 },
+	{ 2, 384000 },
+	{ 3, 460800 },
+	{ 4, 537600 },
+	{ 5, 614400 },
+	{ 6, 691200 },
+	{ 7, 768000 },
+	{ 8, 844800 },
+	{ 9, 921600 },
+	{ 10, 998400 },
+	{ 11, 1075200 },
+	{ 12, 1152000 },
+	{ 13, 1228800 },
+#ifdef CONFIG_LOW_FREQ
+	{ 14, CPUFREQ_TABLE_END },
 #else
-	{ 3, CPUFREQ_TABLE_END },
+	{ 14, 1305600 },
+	{ 15, 1382400 },
+	{ 16, 1459200 },
+	{ 17, 1536000 },
+	{ 18, 1612800 },
+#ifdef CONFIG_SUPER_FREQ
+	{ 19, 1689600 },
+	{ 20, 1766400 },
+	{ 21, 1843200 },
+	{ 22, 1920000 },
+	{ 23, 1996800 },
+	{ 24, CPUFREQ_TABLE_END },
+#else
+	{ 19, CPUFREQ_TABLE_END },
+#endif
 #endif
 };
 
@@ -106,19 +130,41 @@ static struct cpufreq_frequency_table freq_table[] = {
 #define SRC_LPXO (-2)
 #define SRC_AXI  (-1)
 static struct clkctl_acpu_speed acpu_freq_tbl[] = {
-	{ 24576,  SRC_LPXO, 0, 0,  30720000,  1000, VDD_RAW(1000) },
-	{ 61440,  PLL_3,    5, 11, 61440000,  1000, VDD_RAW(1000) },
-	{ 122880, PLL_3,    5, 5,  61440000,  1000, VDD_RAW(1000) },
-	{ 184320, PLL_3,    5, 4,  61440000,  1000, VDD_RAW(1000) },
-	{ MAX_AXI_KHZ, SRC_AXI, 1, 0, 61440000, 1000, VDD_RAW(1000) },
-	{ 245760, PLL_3,    5, 2,  61440000,  1000, VDD_RAW(1000) },
-	{ 368640, PLL_3,    5, 1,  122800000, 1050, VDD_RAW(1050) },
-	{ 768000, PLL_1,    2, 0,  153600000, 1100, VDD_RAW(1100) },
-#ifndef CONFIG_ACPUCLOCK_LIMIT_768MHZ
-	/* ACPU >= 806.4MHz requires MSMC1 @ 1.2V. Voting for
-	 * AXI @ 192MHz accomplishes this implicitly. 806.4MHz
-	 * is updated to 1024MHz at runtime for QSD8x55. */
-	{ 806400, PLL_2,    3, 0,  192000000, 1100, VDD_RAW(1100) },
+	{ 24576,  SRC_LPXO, 0, 0,  30720,  900, VDD_RAW(900) },
+	{ 61440,  PLL_3,    5, 11, 61440,  900, VDD_RAW(900) },
+	{ 122880, PLL_3,    5, 5,  61440,  900, VDD_RAW(900) },
+	{ 184320, PLL_3,    5, 4,  61440,  900, VDD_RAW(900) },
+      { MAX_AXI_KHZ, SRC_AXI, 1, 0, 61440, 900, VDD_RAW(900) },
+//	{ 245000, PLL_3,    5, 2,  122500, 900, VDD_RAW(900) },
+	{ 230400, PLL_3,    5, 1,  192000, 900, VDD_RAW(900) },
+	{ 307200, PLL_3,    5, 1,  192000, 900, VDD_RAW(900) },
+	{ 384000, PLL_1,    2, 0,  192000, 925, VDD_RAW(925) },
+	{ 460800, PLL_3,    5, 1,  192000, 950, VDD_RAW(950) },
+	{ 537600, PLL_2,    3, 0,  192000, 975, VDD_RAW(975) },
+	{ 614400, PLL_2,    3, 0,  192000, 975, VDD_RAW(975) },
+	{ 691200, PLL_2,    3, 0,  192000, 1000, VDD_RAW(1000) },
+	{ 768000, PLL_2,    3, 0,  192000, 1025, VDD_RAW(1025) },
+	{ 844800, PLL_2,    3, 0,  192000, 1025, VDD_RAW(1025) },
+	{ 921600, PLL_2,    3, 0,  192000, 1050, VDD_RAW(1050) },
+	{ 998400, PLL_2,    3, 0,  192000, 1050, VDD_RAW(1050) },
+	{ 1075200, PLL_2,   3, 0,  192000, 1075, VDD_RAW(1075) },
+	{ 1152000, PLL_2,   3, 0,  192000, 1075, VDD_RAW(1075) },
+#ifdef CONFIG_LOW_FREQ
+	{ 1228800, PLL_2,   3, 0,  192000, 1100, VDD_RAW(1100) },
+#else
+	{ 1228800, PLL_2,   3, 0,  192000, 1100, VDD_RAW(1100) },
+	{ 1305600, PLL_2,   3, 0,  192000, 1175, VDD_RAW(1175) },
+	{ 1382400, PLL_2,   3, 0,  192000, 1200, VDD_RAW(1200) },
+	{ 1459200, PLL_2,   3, 0,  192000, 1225, VDD_RAW(1225) },
+	{ 1536000, PLL_2,   3, 0,  192000, 1300, VDD_RAW(1300) },
+	{ 1612800, PLL_2,   3, 0,  192000, 1350, VDD_RAW(1350) },
+#ifdef CONFIG_SUPER_FREQ
+	{ 1689600, PLL_2,   3, 0,  192000, 1400, VDD_RAW(1400) },
+	{ 1766400, PLL_2,   3, 0,  192000, 1425, VDD_RAW(1425) },
+	{ 1843200, PLL_2,   3, 0,  192000, 1475, VDD_RAW(1475) },
+	{ 1920000, PLL_2,   3, 0,  192000, 1475, VDD_RAW(1475) },
+	{ 1996800, PLL_2,   3, 0,  192000, 1475, VDD_RAW(1475) },
+#endif
 #endif
 	{ 0 }
 };
