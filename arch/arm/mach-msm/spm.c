@@ -255,27 +255,17 @@ unsigned int msm_spm_get_vdd(void)
 	return vlevel;
 }
 
-int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
+int msm_spm_set_vdd(unsigned int vlevel)
 {
 	unsigned long flags;
 	struct msm_spm_device *dev;
 	uint32_t timeout_us;
 
 	local_irq_save(flags);
-
-	if (!atomic_read(&msm_spm_set_vdd_x_cpu_allowed) &&
-				unlikely(smp_processor_id() != cpu)) {
-		if (msm_spm_debug_mask & MSM_SPM_DEBUG_VCTL)
-			pr_info("%s: attempting to set vdd of cpu %u from "
-				"cpu %u\n", __func__, cpu, smp_processor_id());
-		goto set_vdd_x_cpu_bail;
-	}
-
-	dev = &per_cpu(msm_spm_devices, cpu);
+	dev = &__get_cpu_var(msm_spm_devices);
 
 	if (msm_spm_debug_mask & MSM_SPM_DEBUG_VCTL)
-		pr_info("%s: requesting cpu %u vlevel 0x%x\n",
-			__func__, cpu, vlevel);
+		pr_info("%s: requesting vlevel 0x%x\n", __func__, vlevel);
 
 	msm_spm_set_vctl(dev, vlevel);
 	msm_spm_flush_shadow(dev, MSM_SPM_REG_SAW_VCTL);
@@ -304,17 +294,15 @@ int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
 	dev->dirty = true;
 
 	if (msm_spm_debug_mask & MSM_SPM_DEBUG_VCTL)
-		pr_info("%s: cpu %u done, remaining timeout %uus\n",
-			__func__, cpu, timeout_us);
+		pr_info("%s: done, remaining timeout %uus\n", __func__,
+			timeout_us);
 
 	local_irq_restore(flags);
 	return 0;
 
 set_vdd_bail:
-	pr_err("%s: cpu %u failed, remaining timeout %uus, vlevel 0x%x\n",
-	       __func__, cpu, timeout_us, msm_spm_get_sts_curr_pmic_data(dev));
-
-set_vdd_x_cpu_bail:
+	pr_err("%s: failed, remaining timeout %uus, vlevel 0x%x\n",
+		__func__, timeout_us, msm_spm_get_sts_curr_pmic_data(dev));
 	local_irq_restore(flags);
 	return -EIO;
 }
@@ -328,16 +316,11 @@ void msm_spm_reinit(void)
 		msm_spm_flush_shadow(dev, i);
 }
 
-void msm_spm_allow_x_cpu_set_vdd(bool allowed)
-{
-	atomic_set(&msm_spm_set_vdd_x_cpu_allowed, allowed ? 1 : 0);
-}
-
 int __init msm_spm_init(struct msm_spm_platform_data *data, int nr_devs)
 {
-	unsigned int cpu;
+	int cpu;
 
-	BUG_ON(nr_devs < num_possible_cpus());
+	BUG_ON(nr_devs != num_possible_cpus());
 	for_each_possible_cpu(cpu) {
 		struct msm_spm_device *dev = &per_cpu(msm_spm_devices, cpu);
 		int i;

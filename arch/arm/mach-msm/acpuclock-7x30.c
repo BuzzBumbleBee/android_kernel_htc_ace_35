@@ -53,11 +53,14 @@
 
 #define MAX_AXI_KHZ 192000
 
+#define PLL2_L_VAL_ADDR  (MSM_CLK_CTL_BASE + 0x33c)
+
 struct clock_state {
 	struct clkctl_acpu_speed	*current_speed;
 	struct mutex			lock;
 	uint32_t			acpu_switch_time_us;
 	uint32_t			vdd_switch_time_us;
+	unsigned long                   power_collapse_khz;
 	unsigned long			wait_for_irq_khz;
 	int				wfi_ramp_down;
 	int				pwrc_ramp_down;
@@ -68,7 +71,7 @@ struct clkctl_acpu_speed {
 	int		src;
 	unsigned int	acpu_src_sel;
 	unsigned int	acpu_src_div;
-	unsigned int	axi_clk_hz;
+	unsigned int	axi_clk_khz;
 	unsigned int	vdd_mv;
 	unsigned int	vdd_raw;
 	unsigned long	lpj; /* loops_per_jiffy */
@@ -160,66 +163,33 @@ static unsigned long max_axi_rate;
 unsigned long acpuclk_power_collapse(int from_idle)
 {
 	int ret = acpuclk_get_rate();
-	if (drv_state.pwrc_ramp_down)
-		acpuclk_set_rate(POWER_COLLAPSE_HZ, SETRATE_PC);
-	return ret * 1000;
+	ret *= 1000;
+	if (ret > drv_state.power_collapse_khz)
+		acpuclk_set_rate(drv_state.power_collapse_khz,
+	(from_idle ? SETRATE_PC_IDLE : SETRATE_PC));
+	return ret;
 }
 
 unsigned long acpuclk_get_wfi_rate(void)
 {
-	return drv_state.wait_for_irq_khz * 1000;
+	return drv_state.wait_for_irq_khz;
 }
 
 #define WAIT_FOR_IRQ_HZ (MAX_AXI_KHZ * 1000)
 unsigned long acpuclk_wait_for_irq(void)
 {
 	int ret = acpuclk_get_rate();
-	if (drv_state.wfi_ramp_down)
-		acpuclk_set_rate(WAIT_FOR_IRQ_HZ, SETRATE_SWFI);
-	return ret * 1000;
+	ret *= 1000;
+	if (ret > drv_state.wait_for_irq_khz)
+		acpuclk_set_rate(drv_state.wait_for_irq_khz, SETRATE_SWFI);
+	return ret;
 }
-
-#ifdef CONFIG_HTC_SMEM_MSMC1C2_DEBUG
-/* mARM */
-#define HTC_SMEM_MSMC1		(MSM_SHARED_RAM_BASE + 0x000F8000)
-#define HTC_SMEM_AXI_SPEED	(MSM_SHARED_RAM_BASE + 0x000F8004)
-/* aARM */
-#define HTC_SMEM_MSMC2_STAT	(MSM_SHARED_RAM_BASE + 0x000F8100)
-#define HTC_SMEM_MSMC2_LAST	(MSM_SHARED_RAM_BASE + 0x000F8104)
-#define HTC_SMEM_MSMC2_CURR	(MSM_SHARED_RAM_BASE + 0x000F8108)
-#define HTC_SMEM_MSMC2_MSMC1	(MSM_SHARED_RAM_BASE + 0x000F810C)
-#define HTC_SMEM_MSMC2_AXI	(MSM_SHARED_RAM_BASE + 0x000F8110)
-#endif
 
 static int acpuclk_set_acpu_vdd(struct clkctl_acpu_speed *s)
 {
-#ifdef CONFIG_HTC_SMEM_MSMC1C2_DEBUG
-	unsigned int smem_val;
-	int ret;
-
-	/* store current MSMC1 and AXI */
-	smem_val = readl(HTC_SMEM_MSMC1);
-	writel(smem_val, HTC_SMEM_MSMC2_MSMC1);
-	smem_val = readl(HTC_SMEM_AXI_SPEED);
-	writel(smem_val, HTC_SMEM_MSMC2_AXI);
-
-	/* store last and current(target) MSMC2 */
-	smem_val = readl(HTC_SMEM_MSMC2_CURR);
-	if (smem_val)
-		writel(smem_val, HTC_SMEM_MSMC2_LAST);
-	writel(s->vdd_mv, HTC_SMEM_MSMC2_CURR);
-
-	writel(0x11112222, HTC_SMEM_MSMC2_STAT);
-	ret = msm_spm_set_vdd(s->vdd_raw);
+	int ret = msm_spm_set_vdd(s->vdd_raw);
 	if (ret)
 		return ret;
-	/* HTC_SMEM_MSMC2_CURR is valid only when STAT:0x33334444 */
-	writel(0x33334444, HTC_SMEM_MSMC2_STAT);
-#else
-	int ret = msm_spm_set_vdd(0, s->vdd_raw);
-	if (ret)
-		return ret;
-#endif
 
 	/* Wait for voltage to stabilize. */
 	udelay(drv_state.vdd_switch_time_us);
@@ -242,6 +212,11 @@ static void acpuclk_set_src(const struct clkctl_acpu_speed *s)
 	reg_clkctl |= s->acpu_src_sel << (4 + 8 * src_sel);
 	reg_clkctl |= s->acpu_src_div << (0 + 8 * src_sel);
 	writel(reg_clkctl, SCSS_CLK_CTL_ADDR);
+
+	/* Program PLL2 L val for overclocked speeds. */
+	if(s->src == PLL_2) {
+		writel(s->acpu_clk_khz/19200, PLL2_L_VAL_ADDR);
+	}
 
 	/* Toggle clock source. */
 	reg_clksel ^= 1;
@@ -292,8 +267,8 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 	/* Increase the AXI bus frequency if needed. This must be done before
 	 * increasing the ACPU frequency, since voting for high AXI rates
 	 * implicitly takes care of increasing the MSMC1 voltage, as needed. */
-	if (tgt_s->axi_clk_hz > strt_s->axi_clk_hz) {
-		res = clk_set_rate(ebi1_clk, tgt_s->axi_clk_hz);
+	if (tgt_s->axi_clk_khz > strt_s->axi_clk_khz) {
+		res = clk_set_rate(ebi1_clk, tgt_s->axi_clk_khz * 1000);
 		if (rc < 0) {
 			pr_err("Setting AXI min rate failed (%d)\n", rc);
 			goto out;
@@ -322,8 +297,8 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 	}
 
 	/* Decrease the AXI bus frequency if we can. */
-	if (tgt_s->axi_clk_hz < strt_s->axi_clk_hz) {
-		res = clk_set_rate(ebi1_clk, tgt_s->axi_clk_hz);
+	if (tgt_s->axi_clk_khz < strt_s->axi_clk_khz) {
+		res = clk_set_rate(ebi1_clk, tgt_s->axi_clk_khz * 1000);
 		if (res < 0)
 			pr_warning("Setting AXI min rate failed (%d)\n", res);
 	}
@@ -402,7 +377,11 @@ static unsigned int acpuclk_get_current_vdd(void)
 	unsigned int vdd_mv;
 
 	vdd_raw = msm_spm_get_vdd();
-	for (vdd_mv = 750; vdd_mv <= 1350; vdd_mv += 25)
+#ifndef CONFIG_JESUS_PHONE
+	for (vdd_mv = 850; vdd_mv <= 1300; vdd_mv += 25)
+#else
+	for (vdd_mv = 850; vdd_mv <= 1450; vdd_mv += 25)
+#endif
 		if (VDD_RAW(vdd_mv) == vdd_raw)
 			break;
 
@@ -425,7 +404,11 @@ static int acpuclk_update_freq_tbl(unsigned int acpu_khz, unsigned int acpu_vdd)
 		pr_err("%s: acpuclk invalid speed %d\n", __func__, acpu_khz);
 		return -1;
 	}
-	if (acpu_vdd > 1350 || acpu_vdd < 750) {
+#ifndef CONFIG_JESUS_PHONE
+	if (acpu_vdd > 1300 || acpu_vdd < 850) {
+#else
+	if (acpu_vdd > 1450 || acpu_vdd < 850) {
+#endif
 		pr_err("%s: acpuclk vdd out of ranage, %d\n",
 			__func__, acpu_vdd);
 		return -2;
@@ -514,14 +497,14 @@ static void __init acpuclk_init(void)
 	ebi1_clk = clk_get(NULL, "ebi1_clk");
 	BUG_ON(ebi1_clk == NULL);
 
-	res = clk_set_rate(ebi1_clk, s->axi_clk_hz);
+	res = clk_set_rate(ebi1_clk, s->axi_clk_khz * 1000);
 	if (res < 0)
 		pr_warning("Setting AXI min rate failed!\n");
 
 	pr_info("ACPU running at %d KHz\n", s->acpu_clk_khz);
 
 	s = acpu_freq_tbl + ARRAY_SIZE(acpu_freq_tbl) - 2;
-	max_axi_rate = s->axi_clk_hz;
+	max_axi_rate = s->axi_clk_khz * 1000;
 	return;
 }
 
@@ -538,61 +521,6 @@ static void __init lpj_init(void)
 	}
 }
 
-/* Update frequency tables for PLL2. */
-void __init pll2_fixup(void)
-{
-	struct clkctl_acpu_speed *speed;
-	struct cpufreq_frequency_table *cpu_freq;
-	u8 pll2_l;
-
-	pll2_l = readl(PLL2_L_VAL_ADDR) & 0xFF;
-	speed = &acpu_freq_tbl[ARRAY_SIZE(acpu_freq_tbl)-2];
-	cpu_freq = &freq_table[ARRAY_SIZE(freq_table)-2];
-
-	if (speed->acpu_clk_khz != 806400 || cpu_freq->frequency != 806400) {
-		pr_err("Frequency table fixups for PLL2 rate failed.\n");
-		BUG();
-	}
-
-	switch (pll2_l) {
-	case PLL2_1024_MHZ:
-		speed->acpu_clk_khz = 1024000;
-		speed->vdd_mv = 1200;
-		speed->vdd_raw = VDD_RAW(1200);
-		cpu_freq->frequency = 1024000;
-		break;
-	case PLL2_1200_MHZ:
-		speed->acpu_clk_khz = 1200000;
-		speed->vdd_mv = 1200;
-		speed->vdd_raw = VDD_RAW(1200);
-		cpu_freq->frequency = 1200000;
-		break;
-	case PLL2_1400_MHZ:
-	case PLL2_1420_MHZ:
-	case PLL2_1440_MHZ:
-	case PLL2_1460_MHZ:
-	case PLL2_1480_MHZ:
-	case PLL2_1500_MHZ:
-	case PLL2_1520_MHZ:
-	case PLL2_1540_MHZ:
-	case PLL2_1560_MHZ:
-		speed->acpu_clk_khz = pll2_l * 19200;
-		speed->vdd_mv = 1250;
-		speed->vdd_raw = VDD_RAW(1250);
-		cpu_freq->frequency = speed->acpu_clk_khz;
-		break;
-	case PLL2_806_MHZ:
-		/* No fixup necessary */
-		break;
-	default:
-		pr_err("Unknown PLL2 lval %d\n", pll2_l);
-		BUG();
-	}
-#ifdef CONFIG_MSM7X30_DDR2
-	speed->axi_clk_hz = UINT_MAX;
-#endif
-}
-
 #define RPM_BYPASS_MASK	(1 << 3)
 #define PMIC_MODE_MASK	(1 << 4)
 void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
@@ -602,11 +530,9 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	mutex_init(&drv_state.lock);
 	drv_state.acpu_switch_time_us = clkdata->acpu_switch_time_us;
 	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
+	drv_state.power_collapse_khz = clkdata->power_collapse_khz;
 	drv_state.wfi_ramp_down = 1;
 	drv_state.pwrc_ramp_down = 1;
-#ifndef CONFIG_ACPUCLOCK_LIMIT_768MHZ
-	pll2_fixup();
-#endif
 	acpuclk_init();
 	lpj_init();
 
